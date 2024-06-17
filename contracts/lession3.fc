@@ -1,0 +1,94 @@
+#include "imports/stdlib.fc";
+
+;; recv_internal
+;; 1. update svc code
+;; 2. transfer messages to owner
+;; 3. deposit (simple send)
+;; 4. owner withdraw
+;; 5. change owner
+
+;; recv_external
+;; 1. selfdestruct (burn smc)
+
+const op::deposit = 0x95db9d39;
+const op::transfer_msg_to_owner = 0xdb9b8933;
+
+(int, int, slice) load_data() inline_ref { ;;secno int, public key int, address Bladelca
+  slice ds = get_data().begin_parse();
+  return (
+    ds~load_uint(32), ;;sekno
+    ds~load_uint(256),  ;;public key
+    ds~load_msg_addr()  ;; address vladelca
+  );
+}
+
+
+
+() store_data(int seqno, int public_key, slice owner_address) impure inline {  ;; function save dannie
+ set_data(  ;; c4 registr storeg
+    begin_cell()
+      .store_uint(seqno, 32)
+      .store_uint(public_key, 256)
+      .store_slice(owner_address)
+    .end_cell()
+ );
+}
+
+() recv_internal(int my_balance, int msg_value, cell in_msg_full, slice in_msg_body) impure {
+  slice cs = in_msg_full.begin_parse();
+  int flags = cs~load_uint(4);
+  if (flags & 1) {  ;; proverka flaga
+    return();
+  }
+
+  slice sender_address = cs~load_msg_addr(); 
+
+  if(in_msg_body.slice_empty?()) { ;;proverca pustoi li slice
+    return();
+  }
+
+  (_, _, owner_address) = load_data();
+
+  int op = in_msg_body~load_uint(32);  ;; dostaem op code
+  int query_id = in_msg_body~load_uint(64);    ;; indificator our zaprosov
+
+  if (op == op::deposit) {
+    return();  ;; prinimait money and saverhaen contract
+  }
+
+  if (op == op::transfer_msg_to_owner) { ;; otpraflenie tokenov boss contact
+    ifnot (equal_slice(sender_address, owner_address)) { ;; srafnifaem addresa bossa and onprafitela
+      cell msg_cell = begin_cell().store_slice(in_msg_body).end_cell();  ;; sozdaem cell
+      
+      cell msg = begin_cell()  ;; sobiraem sms
+                  .store_uint(0x18, 6) ;;flag bounceable  ;; nobounceable - 0x10 ;; log - 0x30
+                  .store_slice(owner_address)  ;;adress komy otpravlaim
+                  .store_coins(0)  ;; skolko deneg otpravliaem
+                  .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+                  .store_slice(sender_address)  ;; ot kogo sms chtoba vladelec mog proverit (address vladelca)
+                  .store_ref(msg_cell)  ;; camo sms
+                .end_cell();
+      send_raw_message(msg, 64); ;; otpravlaim sms
+    }         
+  }
+
+  throw_unless(911, equal_slice(sender_address, owner));
+}
+
+() recv_external(slice in_msg) impure {
+  var signature = in_msg~load_bits(512);  ;; proveraem podpic vladelca i public key
+  slice tmp_in_msg = in_msg;  ;; pereopredelenie peremennoi
+  var hash = slice_hash(in_msg);  ;; hex messages
+
+  (int seqno, int publick_key, slice owner_address) = load_data(); ;;vitagivaem pyblic key and seqno and address
+
+  throw_unless(901, check_signature(hash, signature, public_key));  ;;proverka podpici i public key & avtorization
+
+  int msg_seqno = tmp_in_msg;  ;;  load
+
+  throw_unless(902, msg_seqno == seqno);  ;;proverka seqno
+
+  accept_message();  ;;fistalaet limit gaza in maximum
+
+  tmp_in_msg~touch();  ;;lozim sms na verhinu steka and optimizacia po gazu
+}
